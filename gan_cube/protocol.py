@@ -81,25 +81,35 @@ class GanGen2ProtocolDriver:
         elif event_type == 0x02: # MOVE
             if self.last_serial != -1:
                 serial = msg.get_bit_word(4, 8)
-                diff = min((serial - self.last_serial) & 0xFF, 7)
+                diff = (serial - self.last_serial) & 0xFF
+                if diff > 7: # Should not happen if we are tracking correctly, but GAN protocol uses a circular buffer of 7 moves
+                    diff = 1 
+                
                 self.last_serial = serial
 
                 if diff > 0:
                     for i in range(diff - 1, -1, -1):
-                        face = msg.get_bit_word(12 + 5 * i, 4)
+                        face_idx = msg.get_bit_word(12 + 5 * i, 4)
                         direction = msg.get_bit_word(16 + 5 * i, 1)
-                        move_str = "URFDLB"[face] + " '"[direction]
+                        
+                        face_chars = "URFDLB"
+                        if face_idx < len(face_chars):
+                            face_char = face_chars[face_idx]
+                            move_str = face_char + ("'" if direction else "")
+                        else:
+                            move_str = f"U{face_idx}?" # Fallback
+                        
                         move_str = move_str.strip()
                         
                         elapsed = msg.get_bit_word(47 + 16 * i, 16)
                         if elapsed == 0:
-                            elapsed = timestamp - self.last_move_timestamp
+                            elapsed = int((timestamp - self.last_move_timestamp) * 1000) if self.last_move_timestamp > 0 else 0
                         
                         self.cube_timestamp += elapsed
                         
                         cube_events.append({
                             "type": "MOVE",
-                            "face": face,
+                            "face": face_idx,
                             "direction": direction,
                             "move": move_str,
                             "serial": (serial - i) & 0xFF,
@@ -118,18 +128,33 @@ class GanGen2ProtocolDriver:
             ep = [msg.get_bit_word(47 + i * 4, 4) for i in range(11)]
             eo = [msg.get_bit_word(91 + i, 1) for i in range(11)]
 
-            cp.append(28 - sum(cp))
+            cp.append((28 - sum(cp)) & 0xFF)
             co.append((3 - (sum(co) % 3)) % 3)
-            ep.append(66 - sum(ep))
+            ep.append((66 - sum(ep)) & 0xFF)
             eo.append((2 - (sum(eo) % 2)) % 2)
 
-            cube_events.append({
-                "type": "FACELETS",
-                "serial": serial,
-                "timestamp": timestamp,
-                "state": {"CP": cp, "CO": co, "EP": ep, "EO": eo},
-                "facelets": to_kociemba_facelets(cp, co, ep, eo)
-            })
+            # Validate that all pieces and orientations are within valid ranges
+            if any(p < 0 or p >= 8 for p in cp) or \
+               any(o < 0 or o >= 3 for o in co) or \
+               any(p < 0 or p >= 12 for p in ep) or \
+               any(o < 0 or o >= 2 for o in eo):
+                
+                cube_events.append({
+                    "type": "FACELETS",
+                    "serial": serial,
+                    "timestamp": timestamp,
+                    "state": {"CP": cp, "CO": co, "EP": ep, "EO": eo},
+                    "facelets": None,
+                    "error": "INVALID_STATE"
+                })
+            else:
+                cube_events.append({
+                    "type": "FACELETS",
+                    "serial": serial,
+                    "timestamp": timestamp,
+                    "state": {"CP": cp, "CO": co, "EP": ep, "EO": eo},
+                    "facelets": to_kociemba_facelets(cp, co, ep, eo)
+                })
 
         elif event_type == 0x05: # HARDWARE
             hw_major = msg.get_bit_word(8, 8)

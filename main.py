@@ -14,9 +14,12 @@ async def main():
     
     def on_event(event):
         if event["type"] == "MOVE":
-            print(f"Move detected: {event['move']}")
+            print(f"Cube Moved: {event['move']}")
         elif event["type"] == "FACELETS":
-            print(f"Cube state: {event['facelets']}")
+            if "error" in event:
+                print(f"Cube state error: {event['error']}")
+            else:
+                print(f"Cube state: {event['facelets']}")
         elif event["type"] == "BATTERY":
             print(f"Battery level: {event['batteryLevel']}%")
         elif event["type"] == "HARDWARE":

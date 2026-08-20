@@ -12,8 +12,8 @@ class GanGen2CubeEncrypter:
         self._key = bytearray(key)
         self._iv = bytearray(iv)
         for i in range(6):
-            self._key[i] = (key[i] + salt[i]) % 256
-            self._iv[i] = (iv[i] + salt[i]) % 256
+            self._key[i] = (key[i] + salt[i]) % 0xFF
+            self._iv[i] = (iv[i] + salt[i]) % 0xFF
 
     def _encrypt_chunk(self, data: bytearray, offset: int):
         cipher = AES.new(self._key, AES.MODE_CBC, self._iv)
