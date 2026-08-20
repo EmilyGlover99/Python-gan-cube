@@ -25,9 +25,6 @@ class GanGen2ProtocolDriver:
         self.last_serial = -1
         self.last_move_timestamp = 0
         self.cube_timestamp = 0
-        self.moves_meta = [
-            "U", "U'", "R", "R'", "F", "F'", "D", "D'", "L", "L'", "B", "B'"
-        ]
 
     def create_command_message(self, command_type: str) -> bytes:
         msg = bytearray(20)
@@ -88,50 +85,79 @@ class GanGen2ProtocolDriver:
                 self.last_serial = serial
 
                 if diff > 0:
-                    for i in range(diff):
-                        move_val = msg.get_bit_word(12 + i * 5, 5)
-                        face = move_val // 2
-                        direction = move_val % 2
-                        move_str = self.moves_meta[move_val]
+                    for i in range(diff - 1, -1, -1):
+                        face = msg.get_bit_word(12 + 5 * i, 4)
+                        direction = msg.get_bit_word(16 + 5 * i, 1)
+                        move_str = "URFDLB"[face] + " '"[direction]
+                        move_str = move_str.strip()
                         
-                        # In JS there is more complex timestamp logic but let's simplify for now
+                        elapsed = msg.get_bit_word(47 + 16 * i, 16)
+                        if elapsed == 0:
+                            elapsed = timestamp - self.last_move_timestamp
+                        
+                        self.cube_timestamp += elapsed
+                        
                         cube_events.append({
                             "type": "MOVE",
                             "face": face,
                             "direction": direction,
                             "move": move_str,
-                            "serial": serial,
-                            "localTimestamp": timestamp
+                            "serial": (serial - i) & 0xFF,
+                            "timestamp": timestamp,
+                            "localTimestamp": timestamp if i == 0 else None,
+                            "cubeTimestamp": self.cube_timestamp
                         })
+                    self.last_move_timestamp = timestamp
 
         elif event_type == 0x04: # FACELETS
-            self.last_serial = msg.get_bit_word(4, 8)
+            serial = msg.get_bit_word(4, 8)
+            self.last_serial = serial
             
-            cp = [msg.get_bit_word(12 + i * 3, 3) for i in range(8)]
-            co = [msg.get_bit_word(36 + i * 2, 2) for i in range(8)]
-            ep = [msg.get_bit_word(52 + i * 4, 4) for i in range(12)]
-            eo = [msg.get_bit_word(100 + i, 1) for i in range(12)]
+            cp = [msg.get_bit_word(12 + i * 3, 3) for i in range(7)]
+            co = [msg.get_bit_word(33 + i * 2, 2) for i in range(7)]
+            ep = [msg.get_bit_word(47 + i * 4, 4) for i in range(11)]
+            eo = [msg.get_bit_word(91 + i, 1) for i in range(11)]
+
+            cp.append(28 - sum(cp))
+            co.append((3 - (sum(co) % 3)) % 3)
+            ep.append(66 - sum(ep))
+            eo.append((2 - (sum(eo) % 2)) % 2)
 
             cube_events.append({
                 "type": "FACELETS",
-                "serial": self.last_serial,
+                "serial": serial,
+                "timestamp": timestamp,
                 "state": {"CP": cp, "CO": co, "EP": ep, "EO": eo},
                 "facelets": to_kociemba_facelets(cp, co, ep, eo)
             })
 
         elif event_type == 0x05: # HARDWARE
+            hw_major = msg.get_bit_word(8, 8)
+            hw_minor = msg.get_bit_word(16, 8)
+            sw_major = msg.get_bit_word(24, 8)
+            sw_minor = msg.get_bit_word(32, 8)
+            gyro_supported = msg.get_bit_word(104, 1)
+
+            hardware_name = ""
+            for i in range(8):
+                hardware_name += chr(msg.get_bit_word(i * 8 + 40, 8))
+            hardware_name = hardware_name.strip('\x00')
+
             cube_events.append({
                 "type": "HARDWARE",
-                "hardwareName": event_message[1:9].decode('ascii', errors='ignore').strip('\x00'),
-                "softwareVersion": f"{event_message[9]}.{event_message[10]}",
-                "hardwareVersion": f"{event_message[11]}.{event_message[12]}",
-                "gyroSupported": event_message[18] == 1
+                "timestamp": timestamp,
+                "hardwareName": hardware_name,
+                "softwareVersion": f"{sw_major}.{sw_minor}",
+                "hardwareVersion": f"{hw_major}.{hw_minor}",
+                "gyroSupported": gyro_supported == 1
             })
 
         elif event_type == 0x09: # BATTERY
+            battery_level = msg.get_bit_word(8, 8)
             cube_events.append({
                 "type": "BATTERY",
-                "batteryLevel": msg.get_bit_word(4, 8)
+                "timestamp": timestamp,
+                "batteryLevel": min(battery_level, 100)
             })
 
         return cube_events

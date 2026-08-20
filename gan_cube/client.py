@@ -69,11 +69,14 @@ class GanCubeClient:
             await self.client.write_gatt_char(GAN_GEN2_COMMAND_CHARACTERISTIC, encrypted_msg)
 
     def _notification_handler(self, sender, data):
-        decrypted_data = self.encrypter.decrypt(bytes(data))
-        events = self.driver.handle_state_event(decrypted_data)
-        if self._on_event:
-            for event in events:
-                self._on_event(event)
+        try:
+            decrypted_data = self.encrypter.decrypt(bytes(data))
+            events = self.driver.handle_state_event(decrypted_data)
+            if self._on_event:
+                for event in events:
+                    self._on_event(event)
+        except Exception as e:
+            logger.error(f"Error in notification handler: {e}", exc_info=True)
 
     async def disconnect(self):
         if self.client:
