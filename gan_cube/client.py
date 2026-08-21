@@ -20,7 +20,7 @@ class GanCubeClient:
         self._on_event = callback
 
     async def connect(self):
-        if not self.address:
+        while not self.address:
             logger.info("Scanning for GAN Cube...")
             devices = await BleakScanner.discover(return_adv=True)
             for d, adv in devices.values():
@@ -49,10 +49,11 @@ class GanCubeClient:
                                 logger.info(f"Extracted MAC address from advertisement: {self.mac}")
                                 break
                     break
-        
-        if not self.address:
-            raise Exception("GAN Cube not found")
-
+            
+            if not self.address:
+                logger.info("GAN Cube not found, retrying in 2 seconds...")
+                await asyncio.sleep(2)
+            
         logger.info(f"Connecting to {self.name} ({self.address})...")
         self.client = BleakClient(self.address)
         await self.client.connect()
@@ -94,16 +95,25 @@ class GanCubeClient:
             await self.client.write_gatt_char(GAN_GEN2_COMMAND_CHARACTERISTIC, encrypted_msg)
 
     def _notification_handler(self, sender, data):
-        try:
-            # logger.info(f"Notification data: {bytes(data).hex()}")
-            decrypted_data = self.encrypter.decrypt(bytes(data))
-            # logger.info(f"Decrypted data: {decrypted_data.hex()}")
-            events = self.driver.handle_state_event(decrypted_data)
-            if self._on_event:
-                for event in events:
-                    self._on_event(event)
-        except Exception as e:
-            logger.error(f"Error in notification handler: {e}", exc_info=True)
+        async def handle():
+            try:
+                # logger.info(f"Notification data: {bytes(data).hex()}")
+                decrypted_data = self.encrypter.decrypt(bytes(data))
+                # logger.info(f"Decrypted data: {decrypted_data.hex()}")
+                events = self.driver.handle_state_event(decrypted_data)
+                
+                has_move = any(event["type"] == "MOVE" for event in events)
+                
+                if self._on_event:
+                    for event in events:
+                        self._on_event(event)
+                
+                if has_move:
+                    await self.send_command("REQUEST_FACELETS")
+            except Exception as e:
+                logger.error(f"Error in notification handler: {e}", exc_info=True)
+        
+        asyncio.create_task(handle())
 
     async def disconnect(self):
         if self.client:
