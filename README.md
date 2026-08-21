@@ -100,4 +100,4 @@ Each character represents a face:
 
 ## Acknowledgments
 
-Heavily based on the [gan-web-bluetooth](https://github.com/h-shina/gan-web-bluetooth) Javascript library.
+Heavily based on the [gan-web-bluetooth](https://github.com/afedotov/gan-web-bluetooth) Javascript library.
